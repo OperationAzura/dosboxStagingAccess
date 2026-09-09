@@ -1,7 +1,10 @@
 # Darklands accessibility fork
 
 This branch is based on DOSBox Staging `v0.83.0` (`7b40053b7`) and adds a small
-localhost API used by the sibling DarkText and Darklands Coords projects.
+localhost API used by [DarkText](https://github.com/OperationAzura/darktext)
+and [Darklands Coords](https://github.com/OperationAzura/darklands-coords).
+See the [umbrella repository](https://github.com/OperationAzura/darklands-accessibility)
+for complete installation and architecture documentation.
 
 ## Changes
 
@@ -60,7 +63,7 @@ After creating a GitHub fork:
 
 ```bash
 git remote rename origin upstream
-git remote add origin git@github.com:YOUR-NAME/dosbox-staging.git
+git remote add origin git@github.com:OperationAzura/dosbox-staging-accessibility.git
 git push -u origin darklands-accessibility
 ```
 

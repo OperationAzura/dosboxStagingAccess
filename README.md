@@ -3,6 +3,8 @@
 > This fork contains a localhost framebuffer and input API for Darklands
 > accessibility tools. See [DARKLANDS_ACCESSIBILITY.md](DARKLANDS_ACCESSIBILITY.md)
 > for the fork-specific changes, API, build instructions, and security notes.
+> The complete project is documented in
+> [OperationAzura/darklands-accessibility](https://github.com/OperationAzura/darklands-accessibility).
 
 ![GPL-2.0-or-later][gpl-badge]
 [![Chat][discord-badge]][discord]
