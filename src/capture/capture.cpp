@@ -4,10 +4,13 @@
 
 #include "capture.h"
 
+#include <atomic>
 #include <cassert>
+#include <cstring>
 #include <cerrno>
 #include <cstdio>
 #include <mutex>
+#include <vector>
 
 #include "private/capture_audio.h"
 #include "private/capture_midi.h"
@@ -61,6 +64,211 @@ static struct {
 } capture = {};
 
 static std::unique_ptr<ImageCapturer> image_capturer = {};
+
+
+// DARKTEXT_LIVE_FRAME -----------------------------------------------------
+// Accessibility framebuffer tap.
+//
+// Store every frame handed to CAPTURE_AddFrame. DOSBox Staging can hand the
+// capture path Indexed8, RGB555, RGB565, BGR24, or BGRX32 frames. Preserve the
+// raw bytes and convert them to PPM only when HTTP requests the latest frame.
+
+static std::atomic<bool> live_frame_enabled = true;
+static std::mutex live_frame_mutex = {};
+
+static struct {
+    int width  = 0;
+    int height = 0;
+    int pitch  = 0;
+
+    bool double_width  = false;
+    bool double_height = false;
+    bool is_flipped_vertically = false;
+
+    PixelFormat pixel_format = PixelFormat::Indexed8;
+
+    std::vector<uint8_t> pixels = {};
+    std::array<Rgb888, NumVgaColors> palette = {};
+} live_frame = {};
+
+void CAPTURE_SetLiveFrameEnabled(const bool enabled)
+{
+    live_frame_enabled.store(enabled, std::memory_order_relaxed);
+
+    if (!enabled) {
+        std::lock_guard<std::mutex> lock(live_frame_mutex);
+        live_frame.width  = 0;
+        live_frame.height = 0;
+        live_frame.pitch  = 0;
+        live_frame.pixels.clear();
+    }
+}
+
+bool CAPTURE_IsLiveFrameEnabled()
+{
+    return live_frame_enabled.load(std::memory_order_relaxed);
+}
+
+static void update_live_frame(const RenderedImage& image)
+{
+    if (!image.image_data || image.params.width <= 0 ||
+        image.params.height <= 0 || image.pitch <= 0) {
+        return;
+    }
+
+    const auto num_bytes = static_cast<size_t>(image.params.height) *
+                           static_cast<size_t>(image.pitch);
+
+    std::lock_guard<std::mutex> lock(live_frame_mutex);
+
+    live_frame.width  = image.params.width;
+    live_frame.height = image.params.height;
+    live_frame.pitch  = image.pitch;
+
+    live_frame.double_width  = image.params.double_width;
+    live_frame.double_height = image.params.double_height;
+    live_frame.is_flipped_vertically = image.is_flipped_vertically;
+    live_frame.pixel_format = image.params.pixel_format;
+
+    live_frame.palette = image.palette;
+    live_frame.pixels.assign(image.image_data, image.image_data + num_bytes);
+}
+
+static uint8_t expand_5_to_8(const uint16_t value)
+{
+    const auto v = static_cast<uint8_t>(value & 0x1f);
+    return static_cast<uint8_t>((v << 3) | (v >> 2));
+}
+
+static uint8_t expand_6_to_8(const uint16_t value)
+{
+    const auto v = static_cast<uint8_t>(value & 0x3f);
+    return static_cast<uint8_t>((v << 2) | (v >> 4));
+}
+
+std::string CAPTURE_GetLiveFramePpm()
+{
+    int width  = 0;
+    int height = 0;
+    int pitch  = 0;
+
+    bool double_width  = false;
+    bool double_height = false;
+    bool is_flipped_vertically = false;
+
+    PixelFormat pixel_format = PixelFormat::Indexed8;
+
+    std::vector<uint8_t> pixels = {};
+    std::array<Rgb888, NumVgaColors> palette = {};
+
+    {
+        std::lock_guard<std::mutex> lock(live_frame_mutex);
+
+        if (live_frame.pixels.empty()) {
+            return {};
+        }
+
+        width  = live_frame.width;
+        height = live_frame.height;
+        pitch  = live_frame.pitch;
+
+        double_width  = live_frame.double_width;
+        double_height = live_frame.double_height;
+        is_flipped_vertically = live_frame.is_flipped_vertically;
+        pixel_format = live_frame.pixel_format;
+
+        pixels  = live_frame.pixels;
+        palette = live_frame.palette;
+    }
+
+    const auto x_scale = double_width ? 2 : 1;
+    const auto y_scale = double_height ? 2 : 1;
+
+    const auto out_width  = width * x_scale;
+    const auto out_height = height * y_scale;
+
+    auto ppm = std::string("P6\n") + std::to_string(out_width) + " " +
+               std::to_string(out_height) + "\n255\n";
+
+    ppm.reserve(ppm.size() +
+                static_cast<size_t>(out_width) *
+                static_cast<size_t>(out_height) * 3);
+
+    auto append_rgb = [&ppm](const uint8_t red,
+                             const uint8_t green,
+                             const uint8_t blue) {
+        ppm.push_back(static_cast<char>(red));
+        ppm.push_back(static_cast<char>(green));
+        ppm.push_back(static_cast<char>(blue));
+    };
+
+    for (int y = 0; y < height; ++y) {
+        const auto source_y =
+                is_flipped_vertically ? (height - 1 - y) : y;
+
+        const auto* row =
+                pixels.data() + static_cast<size_t>(source_y) * pitch;
+
+        for (int yr = 0; yr < y_scale; ++yr) {
+            for (int x = 0; x < width; ++x) {
+                uint8_t red   = 0;
+                uint8_t green = 0;
+                uint8_t blue  = 0;
+
+                switch (pixel_format) {
+                case PixelFormat::Indexed8: {
+                    const auto colour = palette[row[x]];
+                    red   = colour.red;
+                    green = colour.green;
+                    blue  = colour.blue;
+                } break;
+
+                case PixelFormat::RGB555_Packed16: {
+                    uint16_t pixel = 0;
+                    std::memcpy(&pixel, row + x * 2, sizeof(pixel));
+
+                    red   = expand_5_to_8((pixel >> 10) & 0x1f);
+                    green = expand_5_to_8((pixel >> 5) & 0x1f);
+                    blue  = expand_5_to_8(pixel & 0x1f);
+                } break;
+
+                case PixelFormat::RGB565_Packed16: {
+                    uint16_t pixel = 0;
+                    std::memcpy(&pixel, row + x * 2, sizeof(pixel));
+
+                    red   = expand_5_to_8((pixel >> 11) & 0x1f);
+                    green = expand_6_to_8((pixel >> 5) & 0x3f);
+                    blue  = expand_5_to_8(pixel & 0x1f);
+                } break;
+
+                case PixelFormat::BGR24_ByteArray: {
+                    const auto* pixel = row + x * 3;
+                    blue  = pixel[0];
+                    green = pixel[1];
+                    red   = pixel[2];
+                } break;
+
+                case PixelFormat::BGRX32_ByteArray: {
+                    const auto* pixel = row + x * 4;
+                    blue  = pixel[0];
+                    green = pixel[1];
+                    red   = pixel[2];
+                } break;
+
+                default:
+                    break;
+                }
+
+                for (int xr = 0; xr < x_scale; ++xr) {
+                    append_rgb(red, green, blue);
+                }
+            }
+        }
+    }
+
+    return ppm;
+}
+// -------------------------------------------------------------------------
 
 bool CAPTURE_IsCapturingAudio()
 {
@@ -386,6 +594,8 @@ void CAPTURE_StopVideoCapture()
 
 void CAPTURE_AddFrame(const RenderedImage& image, const float frames_per_second)
 {
+	update_live_frame(image);
+
 	if (image_capturer) {
 		image_capturer->MaybeCaptureImage(image);
 	}

@@ -45,6 +45,11 @@ void CAPTURE_AddFrame(const RenderedImage& image, const float frames_per_second)
 
 void CAPTURE_AddPostRenderImage([[maybe_unused]] const RenderedImage& image);
 
+// DARKTEXT_LIVE_FRAME: localhost accessibility framebuffer tap.
+void CAPTURE_SetLiveFrameEnabled(bool enabled);
+bool CAPTURE_IsLiveFrameEnabled();
+std::string CAPTURE_GetLiveFramePpm();
+
 // Used to add the last rendered chunk of audio output to be captured either
 // as an audio recording or the audio stream of a video recording (or both).
 void CAPTURE_AddAudioData(const uint32_t sample_rate, const uint32_t num_sample_frames,

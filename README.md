@@ -1,5 +1,9 @@
 # DOSBox Staging
 
+> This fork contains a localhost framebuffer and input API for Darklands
+> accessibility tools. See [DARKLANDS_ACCESSIBILITY.md](DARKLANDS_ACCESSIBILITY.md)
+> for the fork-specific changes, API, build instructions, and security notes.
+
 ![GPL-2.0-or-later][gpl-badge]
 [![Chat][discord-badge]][discord]
 

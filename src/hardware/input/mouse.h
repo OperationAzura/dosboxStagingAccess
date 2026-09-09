@@ -89,6 +89,12 @@ void MOUSE_EventButton(const MouseButtonId button_id, const bool pressed);
 void MOUSE_EventButton(const MouseButtonId button_id, const bool pressed,
                        const MouseInterfaceId device_id);
 
+// DARKLANDS_REMOTE_INPUT
+// Synthetic DOS mouse input for the localhost accessibility/control API.
+// Unlike host GUI input, these calls do not depend on host focus or capture.
+bool MOUSE_InjectRemoteMove(float x_rel, float y_rel);
+bool MOUSE_InjectRemoteButton(MouseButtonId button_id, bool pressed);
+
 void MOUSE_EventWheel(const float w_rel);
 void MOUSE_EventWheel(const int16_t w_rel, const MouseInterfaceId device_id);
 

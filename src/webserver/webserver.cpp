@@ -7,6 +7,12 @@
 #include "dos.h"
 #include "memory.h"
 
+#include "capture/capture.h"
+
+#include <algorithm>
+#include <cctype>
+#include <stdexcept>
+#include <unordered_map>
 #include <set>
 #include <string>
 #include <thread>
@@ -19,6 +25,8 @@
 #include "misc/cross.h"
 #include "misc/logging.h"
 #include "misc/support.h"
+#include "hardware/input/keyboard.h"
+#include "hardware/input/mouse.h"
 
 using json = nlohmann::json;
 
@@ -53,6 +61,333 @@ static void error_handler(const httplib::Request&, httplib::Response& res,
 
 static httplib::Server server;
 
+
+// DARKLANDS_INPUT_API BEGIN
+enum class DarklandsInputAction {
+	Press,
+	Down,
+	Up,
+};
+
+static std::string darklands_lower(std::string value)
+{
+	for (auto& c : value) {
+		c = static_cast<char>(
+		        std::tolower(static_cast<unsigned char>(c)));
+	}
+	return value;
+}
+
+static DarklandsInputAction darklands_parse_action(std::string value)
+{
+	value = darklands_lower(std::move(value));
+
+	if (value == "press" || value == "click") {
+		return DarklandsInputAction::Press;
+	}
+	if (value == "down") {
+		return DarklandsInputAction::Down;
+	}
+	if (value == "up") {
+		return DarklandsInputAction::Up;
+	}
+
+	throw std::invalid_argument(
+	        "action must be press/click, down, or up");
+}
+
+static KBD_KEYS darklands_key_from_name(std::string name)
+{
+	name = darklands_lower(std::move(name));
+
+	static const std::unordered_map<std::string, KBD_KEYS> keys = {
+	        {"1", KBD_1}, {"2", KBD_2}, {"3", KBD_3},
+	        {"4", KBD_4}, {"5", KBD_5}, {"6", KBD_6},
+	        {"7", KBD_7}, {"8", KBD_8}, {"9", KBD_9},
+	        {"0", KBD_0},
+
+	        {"q", KBD_q}, {"w", KBD_w}, {"e", KBD_e},
+	        {"r", KBD_r}, {"t", KBD_t}, {"y", KBD_y},
+	        {"u", KBD_u}, {"i", KBD_i}, {"o", KBD_o},
+	        {"p", KBD_p},
+
+	        {"a", KBD_a}, {"s", KBD_s}, {"d", KBD_d},
+	        {"f", KBD_f}, {"g", KBD_g}, {"h", KBD_h},
+	        {"j", KBD_j}, {"k", KBD_k}, {"l", KBD_l},
+
+	        {"z", KBD_z}, {"x", KBD_x}, {"c", KBD_c},
+	        {"v", KBD_v}, {"b", KBD_b}, {"n", KBD_n},
+	        {"m", KBD_m},
+
+	        {"f1", KBD_f1},   {"f2", KBD_f2},
+	        {"f3", KBD_f3},   {"f4", KBD_f4},
+	        {"f5", KBD_f5},   {"f6", KBD_f6},
+	        {"f7", KBD_f7},   {"f8", KBD_f8},
+	        {"f9", KBD_f9},   {"f10", KBD_f10},
+	        {"f11", KBD_f11}, {"f12", KBD_f12},
+
+	        {"esc", KBD_esc},
+	        {"escape", KBD_esc},
+	        {"tab", KBD_tab},
+	        {"backspace", KBD_backspace},
+	        {"enter", KBD_enter},
+	        {"return", KBD_enter},
+	        {"space", KBD_space},
+
+	        {"left", KBD_left},
+	        {"right", KBD_right},
+	        {"up", KBD_up},
+	        {"down", KBD_down},
+
+	        {"home", KBD_home},
+	        {"end", KBD_end},
+	        {"pageup", KBD_pageup},
+	        {"pgup", KBD_pageup},
+	        {"pagedown", KBD_pagedown},
+	        {"pgdn", KBD_pagedown},
+	        {"insert", KBD_insert},
+	        {"delete", KBD_delete},
+
+	        {"shift", KBD_leftshift},
+	        {"leftshift", KBD_leftshift},
+	        {"rightshift", KBD_rightshift},
+
+	        {"ctrl", KBD_leftctrl},
+	        {"control", KBD_leftctrl},
+	        {"leftctrl", KBD_leftctrl},
+	        {"rightctrl", KBD_rightctrl},
+
+	        {"alt", KBD_leftalt},
+	        {"leftalt", KBD_leftalt},
+	        {"rightalt", KBD_rightalt},
+
+	        {"minus", KBD_minus},
+	        {"equals", KBD_equals},
+	        {"grave", KBD_grave},
+	        {"backslash", KBD_backslash},
+	        {"leftbracket", KBD_leftbracket},
+	        {"rightbracket", KBD_rightbracket},
+	        {"semicolon", KBD_semicolon},
+	        {"quote", KBD_quote},
+	        {"comma", KBD_comma},
+	        {"period", KBD_period},
+	        {"slash", KBD_slash},
+
+	        {"kp0", KBD_kp0},
+	        {"kp1", KBD_kp1},
+	        {"kp2", KBD_kp2},
+	        {"kp3", KBD_kp3},
+	        {"kp4", KBD_kp4},
+	        {"kp5", KBD_kp5},
+	        {"kp6", KBD_kp6},
+	        {"kp7", KBD_kp7},
+	        {"kp8", KBD_kp8},
+	        {"kp9", KBD_kp9},
+	        {"kpenter", KBD_kpenter},
+	        {"kpplus", KBD_kpplus},
+	        {"kpminus", KBD_kpminus},
+	        {"kpmultiply", KBD_kpmultiply},
+	        {"kpdivide", KBD_kpdivide},
+	};
+
+	const auto it = keys.find(name);
+	if (it == keys.end()) {
+		throw std::invalid_argument("unknown key: " + name);
+	}
+
+	return it->second;
+}
+
+static MouseButtonId darklands_mouse_button(std::string name)
+{
+	name = darklands_lower(std::move(name));
+
+	if (name == "left" || name == "1") {
+		return MouseButtonId::Left;
+	}
+	if (name == "right" || name == "2") {
+		return MouseButtonId::Right;
+	}
+	if (name == "middle" || name == "3") {
+		return MouseButtonId::Middle;
+	}
+
+	throw std::invalid_argument(
+	        "button must be left, right, or middle");
+}
+
+
+class DarklandsKeyCommand final : public Command {
+public:
+	DarklandsKeyCommand(const KBD_KEYS key,
+	                    const DarklandsInputAction action)
+	        : key(key),
+	          action(action)
+	{}
+
+	void Execute() override
+	{
+		switch (action) {
+		case DarklandsInputAction::Press:
+			KEYBOARD_AddKey(key, true);
+			KEYBOARD_AddKey(key, false);
+			break;
+
+		case DarklandsInputAction::Down:
+			KEYBOARD_AddKey(key, true);
+			break;
+
+		case DarklandsInputAction::Up:
+			KEYBOARD_AddKey(key, false);
+			break;
+		}
+	}
+
+	static void Post(const httplib::Request& req,
+	                 httplib::Response& res)
+	{
+		const auto j = json::parse(req.body);
+
+		const auto key_name =
+		        j.at("key").get<std::string>();
+
+		const auto action_name =
+		        j.value("action", std::string("press"));
+
+		DarklandsKeyCommand cmd(
+		        darklands_key_from_name(key_name),
+		        darklands_parse_action(action_name));
+
+		cmd.WaitForCompletion();
+
+		if (!cmd.error.empty()) {
+			throw std::runtime_error(cmd.error);
+		}
+
+		json out;
+		out["ok"] = true;
+		out["key"] = key_name;
+		out["action"] = action_name;
+		send_json(res, out);
+	}
+
+private:
+	KBD_KEYS key;
+	DarklandsInputAction action;
+};
+
+
+class DarklandsMouseMoveCommand final : public Command {
+public:
+	DarklandsMouseMoveCommand(const float dx,
+	                          const float dy)
+	        : dx(dx),
+	          dy(dy)
+	{}
+
+	void Execute() override
+	{
+		if (!MOUSE_InjectRemoteMove(dx, dy)) {
+			error = "DOS mouse interface is not active";
+		}
+	}
+
+	static void Post(const httplib::Request& req,
+	                 httplib::Response& res)
+	{
+		const auto j = json::parse(req.body);
+
+		const auto dx = j.value("dx", 0.0f);
+		const auto dy = j.value("dy", 0.0f);
+
+		DarklandsMouseMoveCommand cmd(dx, dy);
+		cmd.WaitForCompletion();
+
+		if (!cmd.error.empty()) {
+			throw std::runtime_error(cmd.error);
+		}
+
+		json out;
+		out["ok"] = true;
+		out["dx"] = dx;
+		out["dy"] = dy;
+		send_json(res, out);
+	}
+
+private:
+	float dx = 0.0f;
+	float dy = 0.0f;
+};
+
+
+class DarklandsMouseButtonCommand final : public Command {
+public:
+	DarklandsMouseButtonCommand(
+	        const MouseButtonId button,
+	        const DarklandsInputAction action)
+	        : button(button),
+	          action(action)
+	{}
+
+	void Execute() override
+	{
+		switch (action) {
+		case DarklandsInputAction::Press:
+			if (!MOUSE_InjectRemoteButton(button, true) ||
+			    !MOUSE_InjectRemoteButton(button, false)) {
+				error = "DOS mouse interface is not active";
+			}
+			break;
+
+		case DarklandsInputAction::Down:
+			if (!MOUSE_InjectRemoteButton(button, true)) {
+				error = "DOS mouse interface is not active";
+			}
+			break;
+
+		case DarklandsInputAction::Up:
+			if (!MOUSE_InjectRemoteButton(button, false)) {
+				error = "DOS mouse interface is not active";
+			}
+			break;
+		}
+	}
+
+	static void Post(const httplib::Request& req,
+	                 httplib::Response& res)
+	{
+		const auto j = json::parse(req.body);
+
+		const auto button_name =
+		        j.at("button").get<std::string>();
+
+		const auto action_name =
+		        j.value("action", std::string("click"));
+
+		DarklandsMouseButtonCommand cmd(
+		        darklands_mouse_button(button_name),
+		        darklands_parse_action(action_name));
+
+		cmd.WaitForCompletion();
+
+		if (!cmd.error.empty()) {
+			throw std::runtime_error(cmd.error);
+		}
+
+		json out;
+		out["ok"] = true;
+		out["button"] = button_name;
+		out["action"] = action_name;
+		send_json(res, out);
+	}
+
+private:
+	MouseButtonId button;
+	DarklandsInputAction action;
+};
+// DARKLANDS_INPUT_API END
+
+
 static void setup_api_handlers()
 {
 	server.Get("/api/v1/cpu/state", CpuStateCommand::Get);
@@ -65,6 +400,30 @@ static void setup_api_handlers()
 	server.Get("/api/v1/memory/:segment/:offset/:len", ReadMemoryCommand::Get);
 	server.Put("/api/v1/memory/:offset", WriteMemoryCommand::Put);
 	server.Put("/api/v1/memory/:segment/:offset", WriteMemoryCommand::Put);
+
+	server.Post("/api/v1/input/key",
+	            DarklandsKeyCommand::Post);
+
+	server.Post("/api/v1/input/mouse/move",
+	            DarklandsMouseMoveCommand::Post);
+
+	server.Post("/api/v1/input/mouse/button",
+	            DarklandsMouseButtonCommand::Post);
+
+
+	// DARKTEXT_LIVE_FRAME: native emulated frame, independent of host window.
+	server.Get("/api/v1/video/frame",
+	           [](const httplib::Request&, httplib::Response& res) {
+		           const auto ppm = CAPTURE_GetLiveFramePpm();
+		           if (ppm.empty()) {
+			           res.status = 503;
+			           res.set_content("No indexed video frame is available yet",
+			                           "text/plain");
+			           return;
+		           }
+		           res.set_header("Cache-Control", "no-store");
+		           res.set_content(ppm, "image/x-portable-pixmap");
+	           });
 }
 
 static std::string strip_port(const std::string& host)
@@ -194,6 +553,7 @@ void WEBSERVER_Init()
 
 	if (section->GetBool("webserver_enabled")) {
 		is_webserver_enabled = true;
+		CAPTURE_SetLiveFrameEnabled(true);
 
 		const auto addr = section->GetString("webserver_bind_address");
 		const auto port = section->GetInt("webserver_port");
@@ -207,6 +567,7 @@ void WEBSERVER_Init()
 
 void WEBSERVER_Destroy()
 {
+	CAPTURE_SetLiveFrameEnabled(false);
 	Webserver::server.stop();
 }
 

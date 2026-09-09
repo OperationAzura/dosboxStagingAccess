@@ -356,9 +356,8 @@ void RENDER_EndUpdate([[maybe_unused]] bool abort)
 
 	RENDER_DrawLine = empty_line_handler;
 
-	if (CAPTURE_IsCapturingImage() || CAPTURE_IsCapturingVideo()) {
-		handle_capture_frame();
-	}
+	// DARKTEXT: always retain the latest emulated frame for accessibility.
+	handle_capture_frame();
 
 	// Only deinterlace the output if the frame has changed
 	if (is_deinterlacing() && render.updating_frame) {

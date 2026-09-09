@@ -548,6 +548,54 @@ void MOUSE_NotifyBooting()
 	}
 }
 
+// DARKLANDS_REMOTE_INPUT BEGIN
+bool MOUSE_InjectRemoteMove(const float x_rel, const float y_rel)
+{
+	auto& interface = MouseInterface::GetInstance(MouseInterfaceId::DOS);
+
+	if (!interface.IsUsingEvents()) {
+		return false;
+	}
+
+	// Maintain our own logical absolute cursor as well as the relative
+	// motion.  Darklands can therefore receive this in either the DOS
+	// driver's relative or seamless absolute input mode.
+	const float max_x = mouse_shared.resolution_x > 0
+	                          ? static_cast<float>(mouse_shared.resolution_x - 1)
+	                          : 0.0f;
+	const float max_y = mouse_shared.resolution_y > 0
+	                          ? static_cast<float>(mouse_shared.resolution_y - 1)
+	                          : 0.0f;
+
+	state.cursor_x_abs = std::clamp(state.cursor_x_abs + x_rel, 0.0f, max_x);
+	state.cursor_y_abs = std::clamp(state.cursor_y_abs + y_rel, 0.0f, max_y);
+
+	const float x_scaled = x_rel * mouse_config.sensitivity_coeff_x;
+	const float y_scaled = y_rel * mouse_config.sensitivity_coeff_y;
+
+	interface.NotifyMoved(x_scaled,
+	                      y_scaled,
+	                      state.cursor_x_abs,
+	                      state.cursor_y_abs);
+
+	return true;
+}
+
+bool MOUSE_InjectRemoteButton(const MouseButtonId button_id,
+                              const bool pressed)
+{
+	auto& interface = MouseInterface::GetInstance(MouseInterfaceId::DOS);
+
+	if (!interface.IsUsingEvents()) {
+		return false;
+	}
+
+	interface.NotifyButton(button_id, pressed);
+	return true;
+}
+// DARKLANDS_REMOTE_INPUT END
+
+
 void MOUSE_EventMoved(const float x_rel, const float y_rel,
                       const float x_abs, const float y_abs)
 {
