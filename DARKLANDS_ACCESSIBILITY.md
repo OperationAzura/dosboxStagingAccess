@@ -63,7 +63,7 @@ After creating a GitHub fork:
 
 ```bash
 git remote rename origin upstream
-git remote add origin git@github.com:OperationAzura/dosbox-staging-accessibility.git
+git remote add origin git@github.com:OperationAzura/dosboxStagingAccess.git
 git push -u origin darklands-accessibility
 ```
 
