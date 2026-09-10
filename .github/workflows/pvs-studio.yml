@@ -1,15 +1,11 @@
 name: PVS-Studio analysis
 permissions: read-all
 
+# This inherited upstream workflow requires PVS-Studio license secrets that
+# are not configured in this fork. Keep it available for intentional manual
+# runs, but do not burn Actions time or emit failure emails on every push.
 on:
-  push:
-    paths-ignore:
-      - '.clang-format'
-      - '.mdl-styles'
-      - '*.md'
-      - 'docs/**'
-      - 'licenses/**'
-      - 'website/**'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
